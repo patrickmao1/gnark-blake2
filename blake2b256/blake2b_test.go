@@ -2,6 +2,8 @@ package blake2b256
 
 import (
 	"encoding/hex"
+	"fmt"
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/test"
 	"github.com/stretchr/testify/require"
@@ -33,7 +35,7 @@ func TestBlake2bBytes(t *testing.T) {
 	}
 
 	assert := test.NewAssert(t)
-	assert.SolvingSucceeded(circuit, assignment)
+	assert.SolvingSucceeded(circuit, assignment, test.WithCurves(bls12381.ID))
 }
 
 type TestCircuit struct {
@@ -44,6 +46,9 @@ type TestCircuit struct {
 func (t *TestCircuit) Define(api frontend.API) error {
 	b2b := NewBlake2b(api)
 	h := b2b.Blake2bBytes(t.Input, 0)
+	fmt.Printf("input %.2x\n", t.Input)
+	fmt.Printf("expected %.2x\n", t.Output)
+	fmt.Printf("actual %.2x\n", h)
 	for i, b := range h {
 		api.AssertIsEqual(b, t.Output[i])
 	}

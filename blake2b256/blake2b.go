@@ -1,6 +1,7 @@
 package blake2b256
 
 import (
+	"fmt"
 	"github.com/consensys/gnark/frontend"
 	"math/big"
 )
@@ -60,16 +61,26 @@ func (blake2b *Blake2b) Blake2bBlocks(m [][16]frontend.Variable, roundIndex fron
 
 	dd := len(m)
 	hs := newEmptyState(dd + 1)
-	sel := blake2b.encodeRoundIndex(roundIndex, dd)
+	sel := encodeRoundIndex(api, roundIndex, dd)
 
-	for i := 0; i < dd-1; i++ {
-		hs[i+1] = blake2b.compress(hs[i], m[i], big.NewInt(int64(i)), 0)
+	for i := 0; i < dd; i++ {
+		f := 0
+		if i+1 == roundIndex {
+			f = 1
+		}
+		hs[i+1] = blake2b.compress(hs[i], m[i], big.NewInt(int64(i)), f)
 	}
-	hs[dd] = blake2b.compress(hs[dd-1], m[dd-1], big.NewInt(int64(dd-1)), 1)
+	for i, h := range hs {
+		fmt.Printf("h[%d] %.16x\n", i, h)
+	}
+	hs = hs[1:]
 
 	// multiplex the dd states into 1 Output state
 	selected := [8]frontend.Variable{}
-	for i := 1; i < len(hs); i++ {
+	for i := range selected {
+		selected[i] = new(big.Int)
+	}
+	for i := 0; i < len(hs); i++ {
 		for j := 0; j < 8; j++ {
 			cur := api.Select(sel[i], hs[i][j], 0)
 			selected[j] = api.Add(selected[j], cur)
@@ -126,15 +137,8 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 		v[i+8] = val
 	}
 
-	tt := api.ToBinary(t, w)
-	v12 := api.ToBinary(v[12], w)
-	xorAssign(api, v12, v12, tt)
-	v[12] = api.FromBinary(v12...)
-
-	tt = api.ToBinary(t.Rsh(t, 64), w)
-	v13 := api.ToBinary(v[13], w)
-	xorAssign(api, v13, v13, tt)
-	v[13] = api.FromBinary(v13...)
+	v[12] = xorWord(api, v[12], t)
+	v[13] = xorWord(api, v[13], t.Rsh(t, 64))
 
 	v14 := api.ToBinary(v[14], w)
 	v14 = selectAssign(api, f, flipBits(api, v14), v14)
@@ -155,8 +159,8 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 	}
 
 	newH := make([]frontend.Variable, 8)
-	xorAssign(api, newH, h[:], v[:8])
-	xorAssign(api, newH, newH, v[8:16])
+	xorWords(api, newH, h[:], v[:8])
+	xorWords(api, newH, newH, v[8:16])
 	copy(h[:], newH[:])
 	return h
 }
@@ -188,7 +192,7 @@ func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 in
 
 	// v[d] := (v[d] ^ v[a]) >>> R1
 	vdBits := api.ToBinary(v[d], w)
-	xorAssign(api, vdBits, vdBits, vaBits)
+	xorBits(api, vdBits, vdBits, vaBits)
 	vdBits = rotr(vdBits, r1)
 	v[d] = api.FromBinary(vdBits...)
 
@@ -199,107 +203,9 @@ func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 in
 
 	// v[b] := (v[b] ^ v[c]) >>> R2
 	vbBits := api.ToBinary(v[b], w)
-	xorAssign(api, vbBits, vbBits, vcBits)
+	xorBits(api, vbBits, vbBits, vcBits)
 	vbBits = rotr(vbBits, r2)
 	v[b] = api.FromBinary(vbBits...)
 
 	return v
-}
-
-func newEmptyState(dd int) [][8]frontend.Variable {
-	hs := make([][8]frontend.Variable, dd)
-	for i, v := range iv {
-		if i == 0 {
-			hs[0][i] = new(big.Int).Xor(v, big.NewInt(0x01010000^32)) // omitting kk as we don't support secret key
-		} else {
-			hs[0][i] = v
-		}
-	}
-	return hs
-}
-
-func (blake2b *Blake2b) encodeRoundIndex(roundIndex frontend.Variable, maxRounds int) []frontend.Variable {
-	api := blake2b.api
-
-	ret := make([]frontend.Variable, maxRounds)
-	for i := 0; i < maxRounds; i++ {
-		isAtRound := api.IsZero(api.Sub(roundIndex, big.NewInt(int64(i))))
-		ret[i] = api.Select(isAtRound, 1, 0)
-	}
-	return ret
-}
-
-func xorAssign(api frontend.API, out, v1, v2 []frontend.Variable) {
-	if len(v1) != len(v2) {
-		panic("xor: v1 and v2 must have the same length")
-	}
-	for i, v1b := range v1 {
-		out[i] = api.Xor(v2[i], v1b)
-	}
-}
-
-func rotr[T any](v []T, r int) []T {
-	l := len(v)
-	// rotate v by r to the right
-	return append(v[l-r:], v[:l-r]...)
-}
-
-func selectAssign(api frontend.API, s frontend.Variable, v1, v2 []frontend.Variable) []frontend.Variable {
-	for i := range v1 {
-		v1[i] = api.Select(s, v1[i], v2[i])
-	}
-	return v1
-}
-
-func flipBits(api frontend.API, vs []frontend.Variable) []frontend.Variable {
-	ret := make([]frontend.Variable, len(vs))
-	for i, v := range vs {
-		ret[i] = api.IsZero(v)
-	}
-	return ret
-}
-
-func bytesToWords(api frontend.API, bs []frontend.Variable) []frontend.Variable {
-	if len(bs)%8 != 0 {
-		panic("bytesToWords: invalid input data length")
-	}
-
-	var ws []frontend.Variable
-
-	for i := 0; i < len(bs)/8; i++ {
-		wordBytes := bs[i*w/8 : (i+1)*w/8]
-		var acc frontend.Variable = new(big.Int)
-		for j, byt := range wordBytes {
-			offset := new(big.Int).Lsh(big.NewInt(1), uint(64-(j+1)*8))
-			acc = api.MulAcc(acc, byt, offset)
-		}
-		ws = append(ws, acc)
-	}
-
-	return ws
-}
-
-func wordsToBytes(api frontend.API, ws []frontend.Variable) []frontend.Variable {
-	var bs []frontend.Variable
-	for _, word := range ws {
-		bits := api.ToBinary(word, w)
-		bits = flipByGroup(bits, 8)
-		for j := 0; j < 8; j++ {
-			bs = append(bs, api.FromBinary(bits[j*8:(j+1)*8]))
-		}
-	}
-	return bs
-}
-
-func flipByGroup(in []frontend.Variable, size int) []frontend.Variable {
-	res := make([]frontend.Variable, len(in))
-	copy(res, in)
-	for i := 0; i < len(res)/size/2; i++ {
-		for j := 0; j < size; j++ {
-			a := i*size + j
-			b := len(res) - (i+1)*size + j
-			res[a], res[b] = res[b], res[a]
-		}
-	}
-	return res
 }
