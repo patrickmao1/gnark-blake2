@@ -1,4 +1,4 @@
-package circuits
+package blake2b256
 
 import (
 	"github.com/consensys/gnark/frontend"
@@ -63,11 +63,11 @@ func (blake2b *Blake2b) Blake2bBlocks(m [][16]frontend.Variable, roundIndex fron
 	sel := blake2b.encodeRoundIndex(roundIndex, dd)
 
 	for i := 0; i < dd-1; i++ {
-		hs[i+1] = blake2b.compress(hs[i], m[i], big.NewInt(int64(i)), false)
+		hs[i+1] = blake2b.compress(hs[i], m[i], big.NewInt(int64(i)), 0)
 	}
-	blake2b.compress(hs[dd], m[dd-1], big.NewInt(int64(dd-1)), true)
+	hs[dd] = blake2b.compress(hs[dd-1], m[dd-1], big.NewInt(int64(dd-1)), 1)
 
-	// multiplex the dd states into 1 output state
+	// multiplex the dd states into 1 Output state
 	selected := [8]frontend.Variable{}
 	for i := 1; i < len(hs); i++ {
 		for j := 0; j < 8; j++ {
@@ -128,12 +128,12 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 
 	tt := api.ToBinary(t, w)
 	v12 := api.ToBinary(v[12], w)
-	api.Xor(v12, tt)
+	xorAssign(api, v12, v12, tt)
 	v[12] = api.FromBinary(v12...)
 
 	tt = api.ToBinary(t.Rsh(t, 64), w)
 	v13 := api.ToBinary(v[13], w)
-	api.Xor(v13, tt)
+	xorAssign(api, v13, v13, tt)
 	v[13] = api.FromBinary(v13...)
 
 	v14 := api.ToBinary(v[14], w)
@@ -154,8 +154,9 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 		v = blake2b.mix(v, 3, 4, 9, 14, m[s[14]], m[s[15]])
 	}
 
-	newH := xorAssign(api, h[:], v[:8])
-	newH = xorAssign(api, newH, v[8:16])
+	newH := make([]frontend.Variable, 8)
+	xorAssign(api, newH, h[:], v[:8])
+	xorAssign(api, newH, newH, v[8:16])
 	copy(h[:], newH[:])
 	return h
 }
@@ -181,22 +182,24 @@ func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 in
 	api := blake2b.api
 
 	// v[a] := (v[a] + v[b] + z) mod 2**w
-	vaBits := api.ToBinary(api.Add(v[a], v[b], z), w)
-	v[a] = api.FromBinary(vaBits...)
+	vaBits := api.ToBinary(api.Add(v[a], v[b], z), w+2) // adding 3 w-bit words can have at most w+2 bits
+	vaBits = vaBits[:w]
+	v[a] = api.FromBinary(vaBits...) // ignore the hi bit to mimic "mod 2**w"
 
 	// v[d] := (v[d] ^ v[a]) >>> R1
-	vdBits := api.ToBinary(v[d])
-	vdBits = xorAssign(api, vdBits, vaBits)
+	vdBits := api.ToBinary(v[d], w)
+	xorAssign(api, vdBits, vdBits, vaBits)
 	vdBits = rotr(vdBits, r1)
 	v[d] = api.FromBinary(vdBits...)
 
 	// v[c] := (v[c] + v[d])     mod 2**w
-	vcBits := api.ToBinary(api.Add(v[c], v[d]), w)
+	vcBits := api.ToBinary(api.Add(v[c], v[d]), w+1)
+	vcBits = vcBits[:w]
 	v[c] = api.FromBinary(vcBits...)
 
 	// v[b] := (v[b] ^ v[c]) >>> R2
-	vbBits := api.ToBinary(v[b])
-	vbBits = xorAssign(api, vbBits, vcBits)
+	vbBits := api.ToBinary(v[b], w)
+	xorAssign(api, vbBits, vbBits, vcBits)
 	vbBits = rotr(vbBits, r2)
 	v[b] = api.FromBinary(vbBits...)
 
@@ -226,14 +229,13 @@ func (blake2b *Blake2b) encodeRoundIndex(roundIndex frontend.Variable, maxRounds
 	return ret
 }
 
-func xorAssign(api frontend.API, v1, v2 []frontend.Variable) []frontend.Variable {
+func xorAssign(api frontend.API, out, v1, v2 []frontend.Variable) {
 	if len(v1) != len(v2) {
 		panic("xor: v1 and v2 must have the same length")
 	}
 	for i, v1b := range v1 {
-		v1[i] = api.Xor(v2[i], v1b)
+		out[i] = api.Xor(v2[i], v1b)
 	}
-	return v1
 }
 
 func rotr[T any](v []T, r int) []T {
@@ -266,7 +268,7 @@ func bytesToWords(api frontend.API, bs []frontend.Variable) []frontend.Variable 
 
 	for i := 0; i < len(bs)/8; i++ {
 		wordBytes := bs[i*w/8 : (i+1)*w/8]
-		var acc frontend.Variable
+		var acc frontend.Variable = new(big.Int)
 		for j, byt := range wordBytes {
 			offset := new(big.Int).Lsh(big.NewInt(1), uint(64-(j+1)*8))
 			acc = api.MulAcc(acc, byt, offset)

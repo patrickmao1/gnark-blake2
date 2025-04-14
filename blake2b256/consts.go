@@ -1,4 +1,4 @@
-package circuits
+package blake2b256
 
 import (
 	"math/big"
@@ -16,14 +16,14 @@ const (
 var iv [8]*big.Int
 
 func init() {
-	iv[0] = big.NewInt(0x6a09e667f3bcc908)
-	iv[1] = big.NewInt(0xbb67ae8584caa73b)
-	iv[2] = big.NewInt(0x3c6ef372fe94f82b)
-	iv[3] = big.NewInt(0xa54ff53a5f1d36f1)
-	iv[4] = big.NewInt(0x510e527fade682d1)
-	iv[5] = big.NewInt(0x9b05688c2b3e6c1f)
-	iv[6] = big.NewInt(0x1f83d9abfb41bd6b)
-	iv[7] = big.NewInt(0x5be0cd19137e2179)
+	iv[0] = new(big.Int).SetUint64(0x6a09e667f3bcc908)
+	iv[1] = new(big.Int).SetUint64(0xbb67ae8584caa73b)
+	iv[2] = new(big.Int).SetUint64(0x3c6ef372fe94f82b)
+	iv[3] = new(big.Int).SetUint64(0xa54ff53a5f1d36f1)
+	iv[4] = new(big.Int).SetUint64(0x510e527fade682d1)
+	iv[5] = new(big.Int).SetUint64(0x9b05688c2b3e6c1f)
+	iv[6] = new(big.Int).SetUint64(0x1f83d9abfb41bd6b)
+	iv[7] = new(big.Int).SetUint64(0x5be0cd19137e2179)
 }
 
 var sigma = [10][16]int{
