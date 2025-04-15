@@ -108,7 +108,7 @@ func wordsToBytes(api frontend.API, ws []frontend.Variable) []frontend.Variable 
 	var bs []frontend.Variable
 	for _, word := range ws {
 		bits := api.ToBinary(word, w)
-		bits = flipByGroup(bits, 8)
+		//bits = flipByGroup(bits, 8)
 		for j := 0; j < 8; j++ {
 			bs = append(bs, api.FromBinary(bits[j*8:(j+1)*8]...))
 		}

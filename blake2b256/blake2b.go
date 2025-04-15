@@ -2,9 +2,19 @@ package blake2b256
 
 import (
 	"fmt"
+	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"math/big"
+	"sync"
 )
+
+var once sync.Once
+
+func init() {
+	once.Do(func() {
+		solver.RegisterHint(divHint)
+	})
+}
 
 func PadZero(data []byte) []byte {
 	if len(data)%128 != 0 {
@@ -47,12 +57,14 @@ func (blake2b *Blake2b) Blake2bBytes(padded []frontend.Variable, ll frontend.Var
 	}
 
 	hashWords := blake2b.Blake2bBlocks(m, ll)
+	fmt.Println("hashWords", hashWords)
 
 	// decompose the 64-bit words into bytes
 	bs := wordsToBytes(api, hashWords[:])
 
 	var ret [32]frontend.Variable
 	copy(ret[:], bs)
+	fmt.Println("hash bytes", ret)
 	return ret
 }
 
