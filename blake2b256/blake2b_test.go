@@ -36,6 +36,10 @@ func TestBlake2bBytes(t *testing.T) {
 		Output: output,
 	}
 
+	//cc, err := frontend.Compile(ecc.BLS12_381.ScalarField(), r1cs.NewBuilder, circuit)
+	//require.NoError(t, err)
+	//fmt.Println("constraints", cc.GetNbConstraints())
+
 	assert := test.NewAssert(t)
 	assert.SolvingSucceeded(circuit, assignment, test.WithCurves(bls12381.ID))
 }

@@ -211,7 +211,7 @@ func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 in
 	// v[d] := (v[d] ^ v[a]) <<< R1
 	vdBits := api.ToBinary(v[d], w)
 	xorBits(api, vdBits, vdBits, vaBits)
-	vdBits = rotl(vdBits, r1)
+	vdBits = rotl(vdBits, r1) // note: the gist spec says it's rotr, but it's actually rotl
 	v[d] = api.FromBinary(vdBits...)
 
 	// v[c] := (v[c] + v[d])     mod 2**w
@@ -222,7 +222,7 @@ func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 in
 	// v[b] := (v[b] ^ v[c]) <<< R2
 	vbBits := api.ToBinary(v[b], w)
 	xorBits(api, vbBits, vbBits, vcBits)
-	vbBits = rotl(vbBits, r2)
+	vbBits = rotl(vbBits, r2) // note: the gist spec says it's rotr, but it's actually rotl
 	v[b] = api.FromBinary(vbBits...)
 
 	return v
