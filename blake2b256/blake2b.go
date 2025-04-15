@@ -181,7 +181,6 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 func (blake2b *Blake2b) mix(v [16]frontend.Variable, a, b, c, d int, x, y frontend.Variable) [16]frontend.Variable {
 	v = blake2b.mixSingle(v, a, b, c, d, r1, r2, x)
 	v = blake2b.mixSingle(v, a, b, c, d, r3, r4, y)
-	//fmt.Println("mix out", v)
 	return v
 }
 
@@ -196,29 +195,23 @@ func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 in
 	vaBits := api.ToBinary(api.Add(v[a], v[b], z), w+2) // adding 3 w-bit words can have at most w+2 bits
 	vaBits = vaBits[:w]                                 // ignore the hi bits to achieve "mod 2**w"
 	v[a] = api.FromBinary(vaBits...)
-	fmt.Printf("a %d v[a] %d\n", a, v[a])
 
 	// v[d] := (v[d] ^ v[a]) <<< R1
 	vdBits := api.ToBinary(v[d], w)
 	xorBits(api, vdBits, vdBits, vaBits)
 	vdBits = rotl(vdBits, r1)
 	v[d] = api.FromBinary(vdBits...)
-	fmt.Printf("d %d v[d] %d\n", d, v[d])
 
 	// v[c] := (v[c] + v[d])     mod 2**w
 	vcBits := api.ToBinary(api.Add(v[c], v[d]), w+1)
 	vcBits = vcBits[:w]
 	v[c] = api.FromBinary(vcBits...)
-	fmt.Printf("c %d v[c] %d\n", c, v[c])
 
 	// v[b] := (v[b] ^ v[c]) <<< R2
 	vbBits := api.ToBinary(v[b], w)
 	xorBits(api, vbBits, vbBits, vcBits)
-	//fmt.Printf("xor bits %d\n", vbBits)
 	vbBits = rotl(vbBits, r2)
 	v[b] = api.FromBinary(vbBits...)
-	//fmt.Printf("R2 %d b %d v[b] %d\n", r2, b, vbBits)
-	fmt.Printf("R2 %d b %d v[b] %d\n", r2, b, v[b])
 
 	return v
 }
