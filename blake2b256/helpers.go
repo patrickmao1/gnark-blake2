@@ -1,18 +1,25 @@
 package blake2b256
 
 import (
+	"fmt"
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/std/rangecheck"
 	"math/big"
-	"slices"
 )
 
-func encodeRoundIndex(api frontend.API, roundIndex frontend.Variable, maxRounds int) []frontend.Variable {
+func encodeSelector(api frontend.API, ll frontend.Variable, maxRounds int) ([]frontend.Variable, frontend.Variable) {
+	roundIndex, _ := div(api, api.Add(ll, 127), 128)
+	roundIndex = api.Sub(roundIndex, 1)
 	ret := make([]frontend.Variable, maxRounds)
 	for i := 0; i < maxRounds; i++ {
 		isAtRound := api.IsZero(api.Sub(roundIndex, big.NewInt(int64(i))))
 		ret[i] = api.Select(isAtRound, 1, 0)
 	}
-	return ret
+	return ret, roundIndex
+}
+
+func isEqual(api frontend.API, a, b frontend.Variable) frontend.Variable {
+	return api.IsZero(api.Sub(a, b))
 }
 
 func newEmptyState(dd int) [][8]frontend.Variable {
@@ -58,6 +65,11 @@ func rotr[T any](v []T, r int) []T {
 	return append(v[l-r:], v[:l-r]...)
 }
 
+func rotl[T any](v []T, r int) []T {
+	// rotate v by r to the left
+	return append(v[r:], v[:r]...)
+}
+
 func selectAssign(api frontend.API, s frontend.Variable, v1, v2 []frontend.Variable) []frontend.Variable {
 	for i := range v1 {
 		v1[i] = api.Select(s, v1[i], v2[i])
@@ -82,7 +94,6 @@ func bytesToWords(api frontend.API, bs []frontend.Variable) []frontend.Variable 
 
 	for i := 0; i < len(bs)/8; i++ {
 		wordBytes := bs[i*w/8 : (i+1)*w/8]
-		slices.Reverse(wordBytes)
 		wordBits := make([]frontend.Variable, 0, w)
 		for _, b := range wordBytes {
 			wordBits = append(wordBits, api.ToBinary(b, 8)...)
@@ -116,4 +127,31 @@ func flipByGroup(in []frontend.Variable, size int) []frontend.Variable {
 		}
 	}
 	return res
+}
+
+func div(api frontend.API, a, b frontend.Variable) (frontend.Variable, frontend.Variable) {
+	out, err := api.Compiler().NewHint(divHint, 2, a, b)
+	if err != nil {
+		panic(fmt.Errorf("failed to initialize div hint instance: %s", err.Error()))
+	}
+	q, r := out[0], out[1]
+	orig := api.Add(api.Mul(q, b), r)
+	api.AssertIsEqual(orig, a)
+	api.AssertIsEqual(api.Cmp(r, b), -1)
+	rangeChecker := rangecheck.New(api)
+	rangeChecker.Check(q, 64)
+	return q, r
+}
+
+func divHint(_ *big.Int, in, out []*big.Int) error {
+	if len(in) != 2 {
+		return fmt.Errorf("QuoRemHint: input len must be 2")
+	}
+	if len(out) != 2 {
+		return fmt.Errorf("QuoRemHint: output len must be 2")
+	}
+	out[0] = new(big.Int)
+	out[1] = new(big.Int)
+	out[0].QuoRem(in[0], in[1], out[1])
+	return nil
 }

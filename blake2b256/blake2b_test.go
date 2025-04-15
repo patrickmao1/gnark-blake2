@@ -27,10 +27,12 @@ func TestBlake2bBytes(t *testing.T) {
 
 	circuit := &TestCircuit{
 		Input:  input,
+		Len:    2,
 		Output: output,
 	}
 	assignment := &TestCircuit{
 		Input:  input,
+		Len:    2,
 		Output: output,
 	}
 
@@ -40,12 +42,13 @@ func TestBlake2bBytes(t *testing.T) {
 
 type TestCircuit struct {
 	Input  []frontend.Variable `gnark:",public"`
+	Len    frontend.Variable
 	Output [32]frontend.Variable
 }
 
 func (t *TestCircuit) Define(api frontend.API) error {
 	b2b := NewBlake2b(api)
-	h := b2b.Blake2bBytes(t.Input, 0)
+	h := b2b.Blake2bBytes(t.Input, t.Len)
 	fmt.Printf("input %.2x\n", t.Input)
 	fmt.Printf("expected %.2x\n", t.Output)
 	fmt.Printf("actual %.2x\n", h)

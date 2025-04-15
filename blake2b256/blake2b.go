@@ -25,7 +25,7 @@ func NewBlake2b(api frontend.API) *Blake2b {
 	return &Blake2b{api}
 }
 
-func (blake2b *Blake2b) Blake2bBytes(padded []frontend.Variable, roundIndex frontend.Variable) [32]frontend.Variable {
+func (blake2b *Blake2b) Blake2bBytes(padded []frontend.Variable, ll frontend.Variable) [32]frontend.Variable {
 	api := blake2b.api
 
 	if len(padded)%16 != 0 {
@@ -46,7 +46,7 @@ func (blake2b *Blake2b) Blake2bBytes(padded []frontend.Variable, roundIndex fron
 		}
 	}
 
-	hashWords := blake2b.Blake2bBlocks(m, roundIndex)
+	hashWords := blake2b.Blake2bBlocks(m, ll)
 
 	// decompose the 64-bit words into bytes
 	bs := wordsToBytes(api, hashWords[:])
@@ -56,22 +56,25 @@ func (blake2b *Blake2b) Blake2bBytes(padded []frontend.Variable, roundIndex fron
 	return ret
 }
 
-func (blake2b *Blake2b) Blake2bBlocks(m [][16]frontend.Variable, roundIndex frontend.Variable) [4]frontend.Variable {
+func (blake2b *Blake2b) Blake2bBlocks(m [][16]frontend.Variable, ll frontend.Variable) [4]frontend.Variable {
 	api := blake2b.api
 
 	dd := len(m)
 	hs := newEmptyState(dd + 1)
-	sel := encodeRoundIndex(api, roundIndex, dd)
+	sel, roundIndex := encodeSelector(api, ll, dd)
+	fmt.Println("sel", sel, "roundIndex", roundIndex)
 
 	for i := 0; i < dd; i++ {
-		f := 0
-		if i+1 == roundIndex {
-			f = 1
-		}
-		hs[i+1] = blake2b.compress(hs[i], m[i], big.NewInt(int64(i)), f)
+		atFinalRound := isEqual(api, i, roundIndex)
+		f := api.Select(atFinalRound, 1, 0)
+		t := api.Select(atFinalRound, ll, (i+1)*128)
+		hs[i+1] = blake2b.compress(hs[i], m[i], t, f)
+	}
+	for i, block := range m {
+		fmt.Printf("blocks[%d] %d\n", i, block)
 	}
 	for i, h := range hs {
-		fmt.Printf("h[%d] %.16x\n", i, h)
+		fmt.Printf("h[%d] %d\n", i, h)
 	}
 	hs = hs[1:]
 
@@ -128,7 +131,7 @@ func (blake2b *Blake2b) Blake2bBlocks(m [][16]frontend.Variable, roundIndex fron
 // RETURN h[0..7]                  // New state.
 //
 // END FUNCTION.
-func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable, t *big.Int, f frontend.Variable) [8]frontend.Variable {
+func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable, t, f frontend.Variable) [8]frontend.Variable {
 	api := blake2b.api
 
 	var v [16]frontend.Variable
@@ -137,13 +140,15 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 		v[i+8] = val
 	}
 
+	fmt.Println("t", t)
 	v[12] = xorWord(api, v[12], t)
-	v[13] = xorWord(api, v[13], t.Rsh(t, 64))
+	//v[13] = xorWord(api, v[13], t.Rsh(t, 64))
 
 	v14 := api.ToBinary(v[14], w)
 	v14 = selectAssign(api, f, flipBits(api, v14), v14)
 	v[14] = api.FromBinary(v14...)
 
+	fmt.Println("init v", v)
 	for i := 0; i < rounds; i++ {
 		s := sigma[i%10]
 
@@ -166,46 +171,54 @@ func (blake2b *Blake2b) compress(h [8]frontend.Variable, m [16]frontend.Variable
 }
 
 // v[a] := (v[a] + v[b] + x) mod 2**w
-// v[d] := (v[d] ^ v[a]) >>> R1
+// v[d] := (v[d] ^ v[a]) <<< R1
 // v[c] := (v[c] + v[d])     mod 2**w
-// v[b] := (v[b] ^ v[c]) >>> R2
+// v[b] := (v[b] ^ v[c]) <<< R2
 // v[a] := (v[a] + v[b] + y) mod 2**w
-// v[d] := (v[d] ^ v[a]) >>> R3
+// v[d] := (v[d] ^ v[a]) <<< R3
 // v[c] := (v[c] + v[d])     mod 2**w
-// v[b] := (v[b] ^ v[c]) >>> R4
+// v[b] := (v[b] ^ v[c]) <<< R4
 func (blake2b *Blake2b) mix(v [16]frontend.Variable, a, b, c, d int, x, y frontend.Variable) [16]frontend.Variable {
 	v = blake2b.mixSingle(v, a, b, c, d, r1, r2, x)
-	return blake2b.mixSingle(v, a, b, c, d, r3, r4, y)
+	v = blake2b.mixSingle(v, a, b, c, d, r3, r4, y)
+	//fmt.Println("mix out", v)
+	return v
 }
 
 // v[a] := (v[a] + v[b] + z) mod 2**w
-// v[d] := (v[d] ^ v[a]) >>> R1
+// v[d] := (v[d] ^ v[a]) <<< R1
 // v[c] := (v[c] + v[d])     mod 2**w
-// v[b] := (v[b] ^ v[c]) >>> R2
+// v[b] := (v[b] ^ v[c]) <<< R2
 func (blake2b *Blake2b) mixSingle(v [16]frontend.Variable, a, b, c, d, r1, r2 int, z frontend.Variable) [16]frontend.Variable {
 	api := blake2b.api
 
 	// v[a] := (v[a] + v[b] + z) mod 2**w
 	vaBits := api.ToBinary(api.Add(v[a], v[b], z), w+2) // adding 3 w-bit words can have at most w+2 bits
-	vaBits = vaBits[:w]
-	v[a] = api.FromBinary(vaBits...) // ignore the hi bit to mimic "mod 2**w"
+	vaBits = vaBits[:w]                                 // ignore the hi bits to achieve "mod 2**w"
+	v[a] = api.FromBinary(vaBits...)
+	fmt.Printf("a %d v[a] %d\n", a, v[a])
 
-	// v[d] := (v[d] ^ v[a]) >>> R1
+	// v[d] := (v[d] ^ v[a]) <<< R1
 	vdBits := api.ToBinary(v[d], w)
 	xorBits(api, vdBits, vdBits, vaBits)
-	vdBits = rotr(vdBits, r1)
+	vdBits = rotl(vdBits, r1)
 	v[d] = api.FromBinary(vdBits...)
+	fmt.Printf("d %d v[d] %d\n", d, v[d])
 
 	// v[c] := (v[c] + v[d])     mod 2**w
 	vcBits := api.ToBinary(api.Add(v[c], v[d]), w+1)
 	vcBits = vcBits[:w]
 	v[c] = api.FromBinary(vcBits...)
+	fmt.Printf("c %d v[c] %d\n", c, v[c])
 
-	// v[b] := (v[b] ^ v[c]) >>> R2
+	// v[b] := (v[b] ^ v[c]) <<< R2
 	vbBits := api.ToBinary(v[b], w)
 	xorBits(api, vbBits, vbBits, vcBits)
-	vbBits = rotr(vbBits, r2)
+	//fmt.Printf("xor bits %d\n", vbBits)
+	vbBits = rotl(vbBits, r2)
 	v[b] = api.FromBinary(vbBits...)
+	//fmt.Printf("R2 %d b %d v[b] %d\n", r2, b, vbBits)
+	fmt.Printf("R2 %d b %d v[b] %d\n", r2, b, v[b])
 
 	return v
 }
