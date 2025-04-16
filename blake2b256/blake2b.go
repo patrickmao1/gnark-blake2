@@ -2,26 +2,9 @@ package blake2b256
 
 import (
 	"fmt"
-	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"math/big"
-	"sync"
 )
-
-var once sync.Once
-
-func init() {
-	once.Do(func() {
-		solver.RegisterHint(divHint)
-	})
-}
-
-func PadZero(data []byte) []byte {
-	if len(data)%128 != 0 {
-		data = append(data, make([]byte, 128-len(data)%128)...)
-	}
-	return data
-}
 
 // This implementation of Blake2b-256 follows the description provided by
 // https://gist.github.com/sooryan/8d1b2c19bf0b971c11366b0680908d4b
@@ -35,10 +18,14 @@ func NewBlake2b(api frontend.API) *Blake2b {
 	return &Blake2b{api}
 }
 
+// Blake2bBytes computes the Blake2b-256 hash of the input.
+// Both the input (`padded`) and output variables are in bytes
+// Input must already be padded (with zero) to fill 128-byte blocks (length is multiple of 128).
+// The length of the input `ll` must reflect the actual length of the pre-padded message.
 func (blake2b *Blake2b) Blake2bBytes(padded []frontend.Variable, ll frontend.Variable) [32]frontend.Variable {
 	api := blake2b.api
 
-	if len(padded)%16 != 0 {
+	if len(padded)%128 != 0 || len(padded) == 0 {
 		panic("invalid input data length")
 	}
 
@@ -74,7 +61,7 @@ func (blake2b *Blake2b) Blake2bBlocks(m [][16]frontend.Variable, ll frontend.Var
 	dd := len(m)
 	hs := newEmptyState(dd + 1)
 	sel, roundIndex := encodeSelector(api, ll, dd)
-	fmt.Println("sel", sel, "roundIndex", roundIndex)
+	fmt.Println("dd", dd, "sel", sel, "roundIndex", roundIndex)
 
 	for i := 0; i < dd; i++ {
 		atFinalRound := isEqual(api, i, roundIndex)

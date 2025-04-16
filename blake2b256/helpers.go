@@ -2,10 +2,27 @@ package blake2b256
 
 import (
 	"fmt"
+	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/rangecheck"
 	"math/big"
+	"sync"
 )
+
+var once sync.Once
+
+func init() {
+	once.Do(func() {
+		solver.RegisterHint(divHint)
+	})
+}
+
+func PadZero(data []byte) []byte {
+	if len(data)%128 != 0 {
+		data = append(data, make([]byte, 128-len(data)%128)...)
+	}
+	return data
+}
 
 func encodeSelector(api frontend.API, ll frontend.Variable, maxRounds int) ([]frontend.Variable, frontend.Variable) {
 	roundIndex, _ := div(api, api.Add(ll, 127), 128)
@@ -114,19 +131,6 @@ func wordsToBytes(api frontend.API, ws []frontend.Variable) []frontend.Variable 
 		}
 	}
 	return bs
-}
-
-func flipByGroup(in []frontend.Variable, size int) []frontend.Variable {
-	res := make([]frontend.Variable, len(in))
-	copy(res, in)
-	for i := 0; i < len(res)/size/2; i++ {
-		for j := 0; j < size; j++ {
-			a := i*size + j
-			b := len(res) - (i+1)*size + j
-			res[a], res[b] = res[b], res[a]
-		}
-	}
-	return res
 }
 
 func div(api frontend.API, a, b frontend.Variable) (frontend.Variable, frontend.Variable) {
