@@ -76,12 +76,6 @@ func xorWord(api frontend.API, w1, w2 frontend.Variable) frontend.Variable {
 	return api.FromBinary(w1Bits...)
 }
 
-func rotr[T any](v []T, r int) []T {
-	l := len(v)
-	// rotate v by r to the right
-	return append(v[l-r:], v[:l-r]...)
-}
-
 func rotl[T any](v []T, r int) []T {
 	// rotate v by r to the left
 	return append(v[r:], v[:r]...)
